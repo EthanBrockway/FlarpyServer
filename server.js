@@ -35,7 +35,17 @@ server.get("/users", async (request, response, next) => {
 server.get("/users", async (request, response, next) => {
   try {
     let result = await collection
-      .find({}, { projection: { username: 1, highscore: 1, _id: 0 } })
+      .find(
+        {},
+        {
+          projection: {
+            username: 1,
+            highscore: 1,
+            _id: 0,
+            currentSelectedSkin: 0,
+          },
+        }
+      )
       .sort({ highscore: -1 })
       .toArray()
     response.send(result)
@@ -120,7 +130,7 @@ server.delete("/users", async (request, response, next) => {
 })
 function authenticateAPI(request, response, next) {
   let apiKey = request.headers["apikey"]
-  console.log(apiKey)
+
   if (apiKey === process.env.API_KEY) {
     next()
   } else {
