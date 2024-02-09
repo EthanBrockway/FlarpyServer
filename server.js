@@ -15,6 +15,23 @@ const client = new MongoClient(uri)
 
 var collection
 
+const validateEmail = (email) => {
+  return String(email)
+    .toLowerCase()
+    .match(/^([a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/)
+}
+
+server.get("/users", async (request, response, next) => {
+  try {
+    let result = await collection
+      .find({}, { projection: { username: 1, highscore: 1, _id: 0 } })
+      .sort({ highscore: -1 })
+      .toArray()
+    response.send(result)
+  } catch (e) {
+    response.status(500).send({ message: e.message })
+  }
+})
 server.get("/users", async (request, response, next) => {
   try {
     let result = await collection
@@ -35,47 +52,60 @@ server.get("/users/all", authenticateToken, async (request, response, next) => {
     response.status(500).send({ message: e.message })
   }
 })
+server.get("/users/:username", async (request, response, next) => {
+  try {
+    let result = await collection.findOne({
+      username: request.params.username,
+    })
+    console.log(result)
+    response.send(result)
+  } catch (e) {
+    response.status(500).send({ message: e.message })
+  }
+})
 
 server.post("/users/login", async (request, response) => {
-  let result = await collection.find().toArray()
+  const result = await collection.find().toArray()
   const user = result.find((user) => user.username === request.body.username)
-  const accessToken = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET)
-
   if (user == null) {
-    return response.status(400).send("Cannot find user")
+    return response.status(401).send("not a valid username")
   }
   try {
     if (await bcrypt.compare(request.body.password, user.password)) {
+      const accessToken = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET)
       response.json({ accessToken: accessToken })
     } else {
-      response.send("Not Allowed")
+      response.status(401).send("Not Allowed")
     }
   } catch (e) {
     response.status(500).send({ message: e.message })
   }
 })
 
-server.post("/users", async (request, response, next) => {
+server.post("/users", authenticateAPI, async (request, response, next) => {
   try {
-    const salt = await bcrypt.genSalt()
-    const hashedPassword = await bcrypt.hash(request.body.password, salt)
-    const user = {
-      email: request.body.email,
-      username: request.body.username,
-      password: hashedPassword,
+    if (validateEmail(request.body.email)) {
+      const salt = await bcrypt.genSalt()
+      const hashedPassword = await bcrypt.hash(request.body.password, salt)
+      const user = {
+        email: request.body.email,
+        username: request.body.username,
+        password: hashedPassword,
+        highscore: request.body.highscore,
+        currentSelectedSkin: request.body.currentSelectedSkin,
+      }
+
+      const doesUserExist = await collection.findOneAndUpdate(
+        { username: request.body.username },
+        { $set: user }
+      )
+      if (!doesUserExist) {
+        collection.insertOne(user)
+      }
+      response.sendStatus(200)
+    } else {
+      response.status(400).send({ message: "Not a valid email address" })
     }
-    // await collection.findOne(
-    //   {
-    //     username: request.body.username,
-    //   },
-    //   {
-    //     $set: { highscore: request.body.highscore },
-    //   }
-    // )
-    // if (!doesUserExist) {
-    await collection.insertOne(user)
-    // }
-    response.sendStatus(200)
   } catch (e) {
     response.status(500).send({ message: e.message })
   }
@@ -88,6 +118,15 @@ server.delete("/users", async (request, response, next) => {
     response.status(500).send({ message: e.message })
   }
 })
+function authenticateAPI(request, response, next) {
+  let apiKey = request.headers["apikey"]
+  console.log(apiKey)
+  if (apiKey === process.env.API_KEY) {
+    next()
+  } else {
+    return response.sendStatus(403)
+  }
+}
 function authenticateToken(request, response, next) {
   const authHeader = request.headers["authorization"]
   const token = authHeader && authHeader.split(" ")[1]
